@@ -42,8 +42,67 @@ const sendVerificationEmail = async (user, token) => {
   await transporter.sendMail({
     from: process.env.EMAIL_USER,
     to: user.email,
-    subject: 'Verify your email',
-    html: `<p>Hi ${user.name},</p><p>Please verify your email by clicking the link below:</p><a href="${verifyUrl}">${verifyUrl}</a>`
+    subject: 'Welcome to Prana - Verify Your Email Address',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #1C8C8C, #0F5F5F); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+          <h1 style="margin: 0; font-size: 28px;">Welcome to Prana</h1>
+          <p style="margin: 10px 0 0 0; font-size: 16px;">Hospital Management System</p>
+        </div>
+        
+        <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+          <h2 style="color: #333; margin-top: 0;">Hello ${user.name},</h2>
+          
+          <p style="color: #555; line-height: 1.6; font-size: 16px;">
+            Thank you for registering with Prana Hospital Management System! We're excited to have you on board.
+          </p>
+          
+          <p style="color: #555; line-height: 1.6; font-size: 16px;">
+            To complete your registration and access your dashboard, please verify your email address by clicking the button below:
+          </p>
+          
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${verifyUrl}" style="background: #1C8C8C; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">Verify Email Address</a>
+          </div>
+          
+          <p style="color: #555; line-height: 1.6; font-size: 16px;">
+            If the button doesn't work, you can copy and paste this link into your browser:
+          </p>
+          
+          <p style="background: #e9e9e9; padding: 15px; border-radius: 5px; word-break: break-all; font-size: 14px; color: #333;">
+            ${verifyUrl}
+          </p>
+          
+          <p style="color: #555; line-height: 1.6; font-size: 16px;">
+            <strong>What happens next?</strong><br>
+            After verifying your email, you'll be automatically logged in and redirected to your dashboard where you can:
+          </p>
+          
+          <ul style="color: #555; line-height: 1.6; font-size: 16px;">
+            <li>Manage patient records and appointments</li>
+            <li>Track inventory and billing</li>
+            <li>Generate reports and analytics</li>
+            <li>Collaborate with your healthcare team</li>
+          </ul>
+          
+          <p style="color: #555; line-height: 1.6; font-size: 16px;">
+            <strong>Security Note:</strong> This verification link will expire after 24 hours for your security. If you don't verify within this time, you'll need to register again.
+          </p>
+          
+          <p style="color: #555; line-height: 1.6; font-size: 16px;">
+            If you didn't create an account with Prana, please ignore this email.
+          </p>
+          
+          <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
+          
+          <p style="color: #888; font-size: 14px; text-align: center;">
+            Best regards,<br>
+            The Prana Team<br>
+            <a href="mailto:info@praanhospital.com" style="color: #1C8C8C;">info@praanhospital.com</a>
+          </p>
+        </div>
+      </div>
+    `
   });
 };
 
@@ -200,7 +259,24 @@ router.get('/verify-email', async (req, res) => {
     user.isVerified = true;
     user.verificationToken = undefined;
     await user.save();
-    res.json({ message: 'Email verified successfully!' });
+    
+    // Create JWT token for automatic login
+    const payload = {
+      id: user._id,
+      email: user.email,
+      role: user.role
+    };
+    
+    jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' }, (err, token) => {
+      if (err) throw err;
+      
+      const { password, ...userWithoutPassword } = user._doc;
+      res.json({
+        message: 'Email verified successfully!',
+        token,
+        user: userWithoutPassword
+      });
+    });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });
   }
