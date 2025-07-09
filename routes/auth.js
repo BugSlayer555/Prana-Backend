@@ -38,7 +38,7 @@ const transporter = nodemailer.createTransport({
 
 // Send verification email
 const sendVerificationEmail = async (user, token) => {
-  const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email?token=${token}`;
+  const verifyUrl = `${process.env.FRONTEND_URL || 'https://pranahealthcare.vercel.app'}/verify-email?token=${token}`;
   await transporter.sendMail({
     from: process.env.EMAIL_USER,
     to: user.email,
