@@ -31,6 +31,8 @@ const userSchema = new mongoose.Schema({
   },
   phone: {
     type: String,
+    required: true,
+    unique: true,
     trim: true
   },
   address: {
@@ -52,7 +54,8 @@ const userSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index for faster email lookups
+// Index for faster email and phone lookups
 userSchema.index({ email: 1 });
+userSchema.index({ phone: 1 });
 
 module.exports = mongoose.model('User', userSchema);

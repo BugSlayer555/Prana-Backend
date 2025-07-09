@@ -114,7 +114,8 @@ router.post('/register', [
   body('email').isEmail().withMessage('Please include a valid email'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   body('role').notEmpty().withMessage('Role is required'),
-  body('department').notEmpty().withMessage('Department is required')
+  body('department').notEmpty().withMessage('Department is required'),
+  body('phone').notEmpty().withMessage('Phone number is required').isMobilePhone().withMessage('Please include a valid phone number')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -124,9 +125,16 @@ router.post('/register', [
     
     const { name, email, password, role, department, phone, address } = req.body;
 
+    // Check if email already exists
     let user = await User.findOne({ email });
     if (user) {
       return res.status(400).json({ message: 'User already exists' });
+    }
+
+    // Check if phone number already exists
+    let phoneUser = await User.findOne({ phone });
+    if (phoneUser) {
+      return res.status(400).json({ message: 'Phone number already registered' });
     }
 
     // Hash password
