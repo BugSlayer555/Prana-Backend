@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
+const Patient = require('../models/Patient');
 const router = express.Router();
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
@@ -27,6 +28,22 @@ const auth = (req, res, next) => {
   }
 };
 
+// Middleware to check if user is approved
+const checkApproval = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user.isApproved && user.role !== 'patient') {
+      return res.status(403).json({ 
+        message: 'Your account is pending approval. Please contact the administrator.',
+        needsApproval: true 
+      });
+    }
+    next();
+  } catch (error) {
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // Nodemailer transporter
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -38,7 +55,7 @@ const transporter = nodemailer.createTransport({
 
 // Send verification email
 const sendVerificationEmail = async (user, token) => {
-  const verifyUrl = `${process.env.FRONTEND_URL || 'https://pranahealthcare.vercel.app'}/verify-email?token=${token}`;
+  const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email?token=${token}`;
   await transporter.sendMail({
     from: process.env.EMAIL_USER,
     to: user.email,
@@ -106,15 +123,58 @@ const sendVerificationEmail = async (user, token) => {
   });
 };
 
+// Send approval notification email
+const sendApprovalEmail = async (user, approved) => {
+  const subject = approved ? 'Account Approved - Welcome to Prana' : 'Account Status Update';
+  const message = approved 
+    ? 'Your account has been approved! You can now access all features of the Prana Hospital Management System.'
+    : 'Your account approval is still pending. We will notify you once it is approved.';
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_USER,
+    to: user.email,
+    subject,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #1C8C8C, #0F5F5F); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+          <h1 style="margin: 0; font-size: 28px;">Prana Hospital</h1>
+          <p style="margin: 10px 0 0 0; font-size: 16px;">Account Status Update</p>
+        </div>
+        
+        <div style="background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px;">
+          <h2 style="color: #333; margin-top: 0;">Hello ${user.name},</h2>
+          
+          <p style="color: #555; line-height: 1.6; font-size: 16px;">
+            ${message}
+          </p>
+          
+          ${approved ? `
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/login" style="background: #1C8C8C; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">Login to Dashboard</a>
+          </div>
+          ` : ''}
+          
+          <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
+          
+          <p style="color: #888; font-size: 14px; text-align: center;">
+            Best regards,<br>
+            The Prana Team<br>
+            <a href="mailto:info@praanhospital.com" style="color: #1C8C8C;">info@praanhospital.com</a>
+          </p>
+        </div>
+      </div>
+    `
+  });
+};
+
 // @route   POST /api/auth/register
-// @desc    Register a new user
+// @desc    Register a new user (admin cannot be registered)
 // @access  Public
 router.post('/register', [
   body('name').notEmpty().withMessage('Name is required'),
   body('email').isEmail().withMessage('Please include a valid email'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   body('role').notEmpty().withMessage('Role is required'),
-  body('department').notEmpty().withMessage('Department is required'),
   body('phone').notEmpty().withMessage('Phone number is required').isMobilePhone().withMessage('Please include a valid phone number')
 ], async (req, res) => {
   try {
@@ -123,7 +183,12 @@ router.post('/register', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const { name, email, password, role, department, phone, address } = req.body;
+    const { name, email, password, role, department, phone, address, dateOfBirth, gender, bloodGroup, specialization, experience, salary } = req.body;
+
+    // Prevent admin registration
+    if (role === 'admin') {
+      return res.status(400).json({ message: 'Admin accounts cannot be created through registration' });
+    }
 
     // Check if email already exists
     let user = await User.findOne({ email });
@@ -150,14 +215,29 @@ router.post('/register', [
       email,
       password: hashedPassword,
       role,
-      department,
+      department: role !== 'patient' ? department : undefined,
       phone,
       address,
+      dateOfBirth: role === 'patient' ? dateOfBirth : undefined,
+      gender: role === 'patient' ? gender : undefined,
+      bloodGroup: role === 'patient' ? bloodGroup : undefined,
+      specialization: role === 'doctor' ? specialization : undefined,
+      experience: role === 'doctor' ? experience : undefined,
+      salary: role !== 'patient' ? salary : undefined,
       isVerified: false,
-      verificationToken
+      verificationToken,
+      isApproved: role === 'patient' // Only patients are auto-approved
     });
 
     await newUser.save();
+
+    // Create patient record if role is patient
+    if (role === 'patient') {
+      const patient = new Patient({
+        userId: newUser._id
+      });
+      await patient.save();
+    }
 
     // Send verification email
     await sendVerificationEmail(newUser, verificationToken);
@@ -175,7 +255,8 @@ router.post('/register', [
       const { password, ...userWithoutPassword } = newUser._doc;
       res.json({
         token,
-        user: userWithoutPassword
+        user: userWithoutPassword,
+        message: role === 'patient' ? 'Registration successful! Please verify your email.' : 'Registration successful! Please wait for admin approval after email verification.'
       });
     });
 
@@ -200,26 +281,51 @@ router.post('/login', [
 
     const { email, password } = req.body;
 
-    let user = await User.findOne({ email });
+    // Check if user exists
+    const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
-    // Check if user is verified
-    if (!user.isVerified) {
-      return res.status(403).json({ message: 'Please verify your email before logging in.' });
+    // Check if account is locked
+    if (user.isLocked()) {
+      return res.status(423).json({ message: 'Account is temporarily locked due to too many failed login attempts' });
     }
 
+    // Check if user is verified
+    if (!user.isVerified) {
+      return res.status(400).json({ message: 'Please verify your email address first' });
+    }
+
+    // Check if user is approved (for non-patients)
+    if (!user.isApproved && user.role !== 'patient') {
+      return res.status(403).json({ 
+        message: 'Your account is pending approval. Please contact the administrator.',
+        needsApproval: true 
+      });
+    }
+
+    // Check password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
+      // Increment login attempts
+      await user.incLoginAttempts();
       return res.status(400).json({ message: 'Invalid credentials' });
     }
+
+    // Reset login attempts on successful login
+    await user.resetLoginAttempts();
+
+    // Update last login
+    user.lastLogin = new Date();
+    await user.save();
 
     // Create JWT token
     const payload = {
       id: user._id,
       email: user.email,
-      role: user.role
+      role: user.role,
+      uniqueId: user.uniqueId
     };
 
     jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' }, (err, token) => {
@@ -238,54 +344,125 @@ router.post('/login', [
   }
 });
 
-// @route   GET /api/auth/me
-// @desc    Get current user
-// @access  Private
-router.get('/me', auth, async (req, res) => {
+// @route   POST /api/auth/verify-email
+// @desc    Verify email address
+// @access  Public
+router.post('/verify-email', async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('-password');
+    const { token } = req.body;
+
+    const user = await User.findOne({ verificationToken: token });
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(400).json({ message: 'Invalid verification token' });
     }
 
-    res.json({ user });
-  } catch (error) {
-    console.error(error.message);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// @route   GET /api/auth/verify-email
-// @desc    Verify user email
-// @access  Public
-router.get('/verify-email', async (req, res) => {
-  const { token } = req.query;
-  if (!token) return res.status(400).json({ message: 'Invalid or missing token.' });
-  try {
-    const user = await User.findOne({ verificationToken: token });
-    if (!user) return res.status(400).json({ message: 'Invalid or expired token.' });
     user.isVerified = true;
     user.verificationToken = undefined;
     await user.save();
-    
+
     // Create JWT token for automatic login
     const payload = {
       id: user._id,
       email: user.email,
-      role: user.role
+      role: user.role,
+      uniqueId: user.uniqueId
     };
-    
+
     jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' }, (err, token) => {
       if (err) throw err;
       
       const { password, ...userWithoutPassword } = user._doc;
       res.json({
-        message: 'Email verified successfully!',
         token,
-        user: userWithoutPassword
+        user: userWithoutPassword,
+        message: 'Email verified successfully!'
       });
     });
+
   } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   GET /api/auth/user
+// @desc    Get current user
+// @access  Private
+router.get('/user', auth, checkApproval, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password');
+    res.json(user);
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   POST /api/auth/approve-user
+// @desc    Approve a user (admin only)
+// @access  Private (Admin)
+router.post('/approve-user', auth, async (req, res) => {
+  try {
+    const admin = await User.findById(req.user.id);
+    if (admin.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admin only.' });
+    }
+
+    const { userId, approved } = req.body;
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    user.isApproved = approved;
+    if (approved) {
+      user.approvedBy = admin._id;
+      user.approvedAt = new Date();
+    }
+    
+    await user.save();
+
+    // Send approval notification email
+    await sendApprovalEmail(user, approved);
+
+    res.json({ 
+      message: approved ? 'User approved successfully' : 'User approval revoked',
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isApproved: user.isApproved
+      }
+    });
+
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   GET /api/auth/pending-approvals
+// @desc    Get pending approvals (admin only)
+// @access  Private (Admin)
+router.get('/pending-approvals', auth, async (req, res) => {
+  try {
+    const admin = await User.findById(req.user.id);
+    if (admin.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admin only.' });
+    }
+
+    const pendingUsers = await User.find({
+      isVerified: true,
+      isApproved: false,
+      role: { $ne: 'patient' }
+    }).select('-password');
+
+    res.json(pendingUsers);
+
+  } catch (error) {
+    console.error(error.message);
     res.status(500).json({ message: 'Server error' });
   }
 });
