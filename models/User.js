@@ -79,8 +79,7 @@ const userSchema = new mongoose.Schema({
     required: function() { return this.role === 'doctor'; }
   },
   licenseNumber: {
-    type: String,
-    required: function() { return this.role === 'doctor'; }
+    type: String
   },
   experience: {
     type: String,
@@ -88,7 +87,7 @@ const userSchema = new mongoose.Schema({
   },
   salary: {
     type: Number,
-    required: function() { return this.role !== 'patient'; }
+    default: 0
   },
   hireDate: {
     type: Date,

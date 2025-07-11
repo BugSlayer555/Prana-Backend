@@ -51,6 +51,7 @@ app.use('/api/billing', require('./routes/billing'));
 app.use('/api/inventory', require('./routes/inventory'));
 app.use('/api/staff', require('./routes/staff'));
 app.use('/api/reports', require('./routes/reports'));
+app.use('/api/family', require('./routes/family'));
 
 // Default route
 app.get('/', (req, res) => {

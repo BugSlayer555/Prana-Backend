@@ -183,7 +183,19 @@ router.post('/register', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const { name, email, password, role, department, phone, address, dateOfBirth, gender, bloodGroup, specialization, experience, salary } = req.body;
+    const { name, email, password, role, department, phone, address, dateOfBirth, gender, bloodGroup, specialization, experience } = req.body;
+
+    // Debug logging
+    console.log('Registration attempt:', {
+      name,
+      email,
+      role,
+      phone,
+      address,
+      dateOfBirth,
+      gender,
+      bloodGroup
+    });
 
     // Prevent admin registration
     if (role === 'admin') {
@@ -193,12 +205,14 @@ router.post('/register', [
     // Check if email already exists
     let user = await User.findOne({ email });
     if (user) {
+      console.log('Email already exists:', email);
       return res.status(400).json({ message: 'User already exists' });
     }
 
     // Check if phone number already exists
     let phoneUser = await User.findOne({ phone });
     if (phoneUser) {
+      console.log('Phone already exists:', phone);
       return res.status(400).json({ message: 'Phone number already registered' });
     }
 
@@ -209,6 +223,9 @@ router.post('/register', [
     // Generate verification token
     const verificationToken = crypto.randomBytes(32).toString('hex');
 
+    // Convert dateOfBirth string to Date object if provided
+    const parsedDateOfBirth = dateOfBirth ? new Date(dateOfBirth) : undefined;
+
     // Create new user
     const newUser = new User({
       name,
@@ -218,18 +235,29 @@ router.post('/register', [
       department: role !== 'patient' ? department : undefined,
       phone,
       address,
-      dateOfBirth: role === 'patient' ? dateOfBirth : undefined,
+      dateOfBirth: role === 'patient' ? parsedDateOfBirth : undefined,
       gender: role === 'patient' ? gender : undefined,
       bloodGroup: role === 'patient' ? bloodGroup : undefined,
       specialization: role === 'doctor' ? specialization : undefined,
       experience: role === 'doctor' ? experience : undefined,
-      salary: role !== 'patient' ? salary : undefined,
       isVerified: false,
       verificationToken,
       isApproved: role === 'patient' // Only patients are auto-approved
     });
 
+    console.log('Saving user with data:', {
+      name: newUser.name,
+      email: newUser.email,
+      role: newUser.role,
+      phone: newUser.phone,
+      address: newUser.address,
+      dateOfBirth: newUser.dateOfBirth,
+      gender: newUser.gender,
+      bloodGroup: newUser.bloodGroup
+    });
+
     await newUser.save();
+    console.log('User saved successfully with ID:', newUser._id);
 
     // Create patient record if role is patient
     if (role === 'patient') {
@@ -240,7 +268,12 @@ router.post('/register', [
     }
 
     // Send verification email
-    await sendVerificationEmail(newUser, verificationToken);
+    try {
+      await sendVerificationEmail(newUser, verificationToken);
+    } catch (emailError) {
+      console.log('Email not configured, skipping email verification:', emailError.message);
+      // Continue with registration even if email fails
+    }
 
     // Create JWT token
     const payload = {
@@ -253,10 +286,20 @@ router.post('/register', [
       if (err) throw err;
       
       const { password, ...userWithoutPassword } = newUser._doc;
+      
+      // Determine message based on email configuration
+      let message;
+      if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+        message = role === 'patient' ? 'Registration successful! Please verify your email.' : 'Registration successful! Please wait for admin approval after email verification.';
+      } else {
+        message = role === 'patient' ? 'Registration successful! Please contact admin for account activation.' : 'Registration successful! Please wait for admin approval.';
+      }
+      
       res.json({
         token,
         user: userWithoutPassword,
-        message: role === 'patient' ? 'Registration successful! Please verify your email.' : 'Registration successful! Please wait for admin approval after email verification.'
+        message,
+        emailSent: !!(process.env.EMAIL_USER && process.env.EMAIL_PASS)
       });
     });
 
