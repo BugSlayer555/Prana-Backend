@@ -522,4 +522,80 @@ router.get('/pending-approvals', auth, async (req, res) => {
   }
 });
 
+// @route   POST /api/auth/create-admin
+// @desc    Create initial admin account (use only once)
+// @access  Public (but should be protected in production)
+router.post('/create-admin', [
+  body('name').notEmpty().withMessage('Name is required'),
+  body('email').isEmail().withMessage('Please include a valid email'),
+  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  body('adminSecret').notEmpty().withMessage('Admin secret is required')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+    
+    const { name, email, password, adminSecret } = req.body;
+
+    // Check admin secret (you should change this to a secure secret)
+    if (adminSecret !== 'PRANA_ADMIN_2024') {
+      return res.status(403).json({ message: 'Invalid admin secret' });
+    }
+
+    // Check if admin already exists
+    const existingAdmin = await User.findOne({ role: 'admin' });
+    if (existingAdmin) {
+      return res.status(400).json({ message: 'Admin account already exists' });
+    }
+
+    // Check if email already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: 'User with this email already exists' });
+    }
+
+    // Hash password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Create admin user
+    const adminUser = new User({
+      name,
+      email,
+      password: hashedPassword,
+      role: 'admin',
+      isVerified: true,
+      isApproved: true,
+      uniqueId: 'ADMIN001'
+    });
+
+    await adminUser.save();
+
+    // Create JWT token
+    const payload = {
+      id: adminUser._id,
+      email: adminUser.email,
+      role: adminUser.role,
+      uniqueId: adminUser.uniqueId
+    };
+
+    jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' }, (err, token) => {
+      if (err) throw err;
+      
+      const { password, ...userWithoutPassword } = adminUser._doc;
+      res.json({
+        token,
+        user: userWithoutPassword,
+        message: 'Admin account created successfully!'
+      });
+    });
+
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 module.exports = router;
