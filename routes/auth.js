@@ -56,7 +56,8 @@ const transporter = nodemailer.createTransport({
 // Send verification email
 const sendVerificationEmail = async (user, token) => {
   const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email?token=${token}`;
-  await transporter.sendMail({
+  // Add timeout to prevent hanging
+  const emailPromise = transporter.sendMail({
     from: process.env.EMAIL_USER,
     to: user.email,
     subject: 'Welcome to Prana - Verify Your Email Address',
@@ -121,6 +122,11 @@ const sendVerificationEmail = async (user, token) => {
       </div>
     `
   });
+  // Add timeout of 10 seconds
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Email timeout')), 10000);
+  });
+  await Promise.race([emailPromise, timeoutPromise]);
 };
 
 // Send approval notification email
@@ -130,7 +136,8 @@ const sendApprovalEmail = async (user, approved) => {
     ? 'Your account has been approved! You can now access all features of the Prana Hospital Management System.'
     : 'Your account approval is still pending. We will notify you once it is approved.';
 
-  await transporter.sendMail({
+  // Add timeout to prevent hanging
+  const emailPromise = transporter.sendMail({
     from: process.env.EMAIL_USER,
     to: user.email,
     subject,
@@ -165,6 +172,11 @@ const sendApprovalEmail = async (user, approved) => {
       </div>
     `
   });
+  // Add timeout of 10 seconds
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Email timeout')), 10000);
+  });
+  await Promise.race([emailPromise, timeoutPromise]);
 };
 
 // @route   POST /api/auth/register
@@ -267,13 +279,11 @@ router.post('/register', [
       await patient.save();
     }
 
-    // Send verification email
-    try {
-      await sendVerificationEmail(newUser, verificationToken);
-    } catch (emailError) {
+    // Send verification email (non-blocking)
+    sendVerificationEmail(newUser, verificationToken).catch(emailError => {
       console.log('Email not configured, skipping email verification:', emailError.message);
       // Continue with registration even if email fails
-    }
+    });
 
     // Create JWT token
     const payload = {
@@ -466,8 +476,10 @@ router.post('/approve-user', auth, async (req, res) => {
     
     await user.save();
 
-    // Send approval notification email
-    await sendApprovalEmail(user, approved);
+    // Send approval notification email (non-blocking)
+    sendApprovalEmail(user, approved).catch(emailError => {
+      console.log('Email not configured, skipping approval email:', emailError.message);
+    });
 
     res.json({ 
       message: approved ? 'User approved successfully' : 'User approval revoked',

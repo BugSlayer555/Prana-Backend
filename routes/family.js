@@ -181,13 +181,14 @@ router.post('/request', auth, [
 
     await familyRequest.save();
 
-    // Send email notification
-    try {
-      const requester = await User.findById(requesterId);
-      await sendFamilyRequestEmail(requester, requestedUser, relationship);
-    } catch (emailError) {
-      console.log('Email not configured, skipping family request email:', emailError.message);
-    }
+    // Send email notification (non-blocking)
+    User.findById(requesterId).then(requester => {
+      sendFamilyRequestEmail(requester, requestedUser, relationship).catch(emailError => {
+        console.log('Email not configured, skipping family request email:', emailError.message);
+      });
+    }).catch(error => {
+      console.log('Failed to fetch requester for email:', error.message);
+    });
 
     res.json({ 
       message: 'Family request sent successfully',
