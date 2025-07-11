@@ -27,7 +27,7 @@ const auth = (req, res, next) => {
 };
 
 // Nodemailer transporter
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,
