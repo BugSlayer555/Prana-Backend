@@ -549,6 +549,30 @@ router.get('/pending-approvals', auth, async (req, res) => {
   }
 });
 
+// @route   GET /api/auth/users
+// @desc    Get users by role and approval status (admin only)
+// @access  Private (Admin)
+router.get('/users', auth, async (req, res) => {
+  try {
+    const admin = await User.findById(req.user.id);
+    if (!admin || admin.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied. Admin only.' });
+    }
+
+    const { role, approved } = req.query;
+    const filter = {};
+    if (role) filter.role = role;
+    if (approved !== undefined) filter.isApproved = approved === 'true';
+
+    // Exclude password from results
+    const users = await User.find(filter).select('-password');
+    res.json(users);
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // @route   POST /api/auth/create-admin
 // @desc    Create initial admin account (use only once)
 // @access  Public (but should be protected in production)
