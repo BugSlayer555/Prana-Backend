@@ -285,33 +285,44 @@ router.post('/register', [
       // Continue with registration even if email fails
     });
 
-    // Create JWT token
-    const payload = {
-      id: newUser._id,
-      email: newUser.email,
-      role: newUser.role
-    };
+    // Determine message based on email configuration
+    let message;
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+      message = role === 'patient' ? 'Registration successful! Please verify your email.' : 'Registration successful! Please wait for admin approval after email verification.';
+    } else {
+      message = role === 'patient' ? 'Registration successful! Please contact admin for account activation.' : 'Registration successful! Please wait for admin approval.';
+    }
+    
+    // Only create JWT token for patients (auto-approved users)
+    if (role === 'patient') {
+      const payload = {
+        id: newUser._id,
+        email: newUser.email,
+        role: newUser.role
+      };
 
-    jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' }, (err, token) => {
-      if (err) throw err;
-      
+      jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' }, (err, token) => {
+        if (err) throw err;
+        
+        const { password, ...userWithoutPassword } = newUser._doc;
+        
+        res.json({
+          token,
+          user: userWithoutPassword,
+          message,
+          emailSent: !!(process.env.EMAIL_USER && process.env.EMAIL_PASS)
+        });
+      });
+    } else {
+      // For non-patient users, don't return token - they need approval first
       const { password, ...userWithoutPassword } = newUser._doc;
       
-      // Determine message based on email configuration
-      let message;
-      if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-        message = role === 'patient' ? 'Registration successful! Please verify your email.' : 'Registration successful! Please wait for admin approval after email verification.';
-      } else {
-        message = role === 'patient' ? 'Registration successful! Please contact admin for account activation.' : 'Registration successful! Please wait for admin approval.';
-      }
-      
       res.json({
-        token,
-        user: userWithoutPassword,
         message,
-        emailSent: !!(process.env.EMAIL_USER && process.env.EMAIL_PASS)
+        emailSent: !!(process.env.EMAIL_USER && process.env.EMAIL_PASS),
+        needsApproval: true
       });
-    });
+    }
 
   } catch (error) {
     console.error(error.message);
@@ -413,7 +424,23 @@ router.post('/verify-email', async (req, res) => {
     user.verificationToken = undefined;
     await user.save();
 
-    // Create JWT token for automatic login
+    // Check if user needs admin approval (for non-patients)
+    if (!user.isApproved && user.role !== 'patient') {
+      return res.json({
+        message: 'Email verified successfully! Please wait for admin approval.',
+        needsApproval: true,
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          isVerified: user.isVerified,
+          isApproved: user.isApproved
+        }
+      });
+    }
+
+    // Create JWT token for automatic login (only for patients or approved users)
     const payload = {
       id: user._id,
       email: user.email,
