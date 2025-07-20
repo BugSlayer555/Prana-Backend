@@ -535,8 +535,8 @@ router.get('/pending-approvals', auth, async (req, res) => {
       return res.status(403).json({ message: 'Access denied. Admin only.' });
     }
 
+    // Show all unapproved staff regardless of email verification status
     const pendingUsers = await User.find({
-      isVerified: true,
       isApproved: false,
       role: { $ne: 'patient' }
     }).select('-password');
